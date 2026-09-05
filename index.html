@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple ParaScan</title>
+    <style>
+        body { font-family: sans-serif; background: #f3f4f6; padding: 15px; text-align: center; }
+        .box { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 15px; }
+        video { width: 100%; border-radius: 8px; background: #000; aspect-ratio: 4/3; object-fit: cover; }
+        button { background: #4F46E5; color: white; border: none; padding: 12px; font-size: 16px; font-weight: bold; border-radius: 8px; width: 100%; margin-top: 10px; cursor: pointer; }
+        .voice-btn { background: #EF4444; }
+        textarea { width: 100%; height: 100px; margin-top: 10px; border-radius: 8px; padding: 8px; border: 1px solid #ccc; font-size: 14px; }
+        .summary { background: #e0e7ff; padding: 10px; border-radius: 8px; font-size: 14px; text-align: left; margin-top: 10px; font-weight: 500; }
+        .hidden { display: none !important; }
+        .log { font-style: italic; color: #555; margin: 5px 0; font-size: 13px; }
+    </style>
+    <!-- Simple CDN for Text Scanning (OCR) -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+</head>
+<body>
+
+    <h2>📝 ParaScan Simple</h2>
+    
+    <!-- PHASE 1: CAM SCANNING -->
+    <div class="box" id="scan-view">
+        <video id="video" autoplay playsinline muted></video>
+        <button id="btn-snap">📷 Snap & Summarize Paragraph</button>
+        <div class="log" id="scan-status">Point at text and tap tap snap.</div>
+        <canvas id="canvas" class="hidden"></canvas>
+    </div>
+
+    <!-- PHASE 2: SUMMARY & VOICE QUESTIONS -->
+    <div class="box hidden" id="result-view">
+        <h3>Scanned Paragraph</h3>
+        <textarea id="text-box"></textarea>
+        
+        <h3>✨ Summary</h3>
+        <div class="summary" id="summary-box">Thinking...</div>
+        
+        <button class="voice-btn" id="btn-voice">🎙️ Interrupt / Ask Question</button>
+        <div class="log" id="voice-status">Idle</div>
+
+        <div style="margin-top:15px; text-align:left;" id="qa-display" class="hidden">
+            <p><strong>Your Question:</strong> <span id="lbl-question"></span></p>
+            <p style="color:#4F46E5; margin-top:5px;"><strong>AI Answer:</strong> <span id="lbl-answer"></span></p>
+        </div>
+
+        <button style="background:#6B7280; margin-top:20px;" id="btn-restart">🔄 Scan Something New</button>
+    </div>
+
+<script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const btnSnap = document.getElementById('btn-snap');
+    const btnVoice = document.getElementById('btn-voice');
+    const btnRestart = document.getElementById('btn-restart');
+    const scanView = document.getElementById('scan-view');
+    const resultView = document.getElementById('result-view');
+    const textBox = document.getElementById('text-box');
+    const summaryBox = document.getElementById('summary-box');
+    const scanStatus = document.getElementById('scan-status');
+    const voiceStatus = document.getElementById('voice-status');
+    const qaDisplay = document.getElementById('qa-display');
+    const lblQuestion = document.getElementById('lbl-question');
+    const lblAnswer = document.getElementById('lbl-answer');
+
+    let stream = null;
+
+    // Start Mobile Back Camera Array Array
+    async function startCamera() {
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment' },
+                audio: false
+            });
+            video.srcObject = stream;
+        } catch (e) {
+            scanStatus.innerText = "Camera error or permission denied.";
+        }
+    }
+    window.addEventListener('DOMContentLoaded', startCamera);
+
+    // Capture Frame and Read Real Text String
+    btnSnap.addEventListener('click', async () => {
+        if (!video.videoWidth) { alert("Camera not ready."); return; }
+        btnSnap.disabled = true;
+        scanStatus.innerText = "Reading printed text lines...";
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg');
+
+        try {
+            // Simplified Tesseract direct recognition call syntax
+            const result = await Tesseract.recognize(dataUrl, 'eng');
+            let text = result.data.text.replace(/\s+/g, ' ').trim();
+            btnSnap.disabled = false;
+            scanStatus.innerText = "Done.";
+
+            if (text.length < 10) {
+                alert("Couldn't read text clearly. Try closer or in better lighting.");
+                return;
+            }
+
+            // Move to Results Dashboard Screen
+            scanView.classList.add('hidden');
+            resultView.classList.remove('hidden');
+            if (stream) stream.getTracks().forEach(t => t.stop());
+
+            textBox.value = text;
+            
+            // Generate simple extractive 2-sentence summary
+            let sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+            sentences = sentences.map(s => s.trim());
+            if (sentences.length <= 2) {
+                summaryBox.innerText = sentences.join(" ");
+            } else {
+                summaryBox.innerText = sentences[0] + " " + (sentences[1] || "") + ".. " + sentences[sentences.length - 1];
+            }
+
+        } catch (err) {
+            alert("OCR Engine error. Try reloading.");
+            btnSnap.disabled = false;
+        }
+    });
+
+    // Voice Engine Core Configurations
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const SpeechSynthesis = window.speechSynthesis;
+
+    function speakText(msg) {
+        if (SpeechSynthesis) {
+            SpeechSynthesis.cancel();
+            let u = new SpeechSynthesisUtterance(msg);
+            u.lang = 'en-US';
+            SpeechSynthesis.speak(u);
+        }
+    }
+
+    if (!SpeechRecognition) {
+        btnVoice.disabled = true;
+        voiceStatus.innerText = "Voice engine not supported on this browser version.";
+    } else {
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'en-US';
+
+        btnVoice.addEventListener('click', () => {
+            voiceStatus.innerText = "Prompting user...";
+            speakText("What is your question?");
+            
+            // Open user recording speech line array stream 1.5 seconds later
+            setTimeout(() => {
+                qaDisplay.classList.add('hidden');
+                voiceStatus.innerText = "Listening for question...";
+                recognition.start();
+            }, 1500);
+        });
+
+        recognition.onresult = (event) => {
+            // Safe multi-indexed variable fetch format
+            const questionText = event.results[0][0].transcript;
+            lblQuestion.innerText = questionText;
+            qaDisplay.classList.remove('hidden');
+
+            const paragraphText = textBox.value.toLowerCase();
+            let sentences = paragraphText.match(/[^.!?]+[.!?]+/g) || [paragraphText];
+
+            // Strip fluff fillers to evaluate target keyword parameters
+            let keywords = questionText.toLowerCase()
+                .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g,"")
+                .split(" ")
+                .filter(w => w.length > 3 && !['what','when','where','who','your','that','this','with','from','have','does'].includes(w));
+
+            let matchFoundText = "I don't know."; // Safety constraint baseline fallback flag
+
+            if (keywords.length > 0) {
+                let high = 0;
+                for (let s of sentences) {
+                    let c = 0;
+                    keywords.forEach(k => { if (s.includes(k)) c++; });
+                    if (c > high && c >= 1) {
+                        high = c;
+                        matchFoundText = s.trim();
+                    }
+                }
+            }
+
+            // Format answer outputs structural alignment
+            matchFoundText = matchFoundText.charAt(0).toUpperCase() + matchFoundText.slice(1);
+            lblAnswer.innerText = matchFoundText;
+            voiceStatus.innerText = "Answer spoken aloud.";
+            speakText(matchFoundText);
+        };
+
+        recognition.onerror = () => { voiceStatus.innerText = "Error capturing microphone stream."; };
+        recognition.onend = () => { if(voiceStatus.innerText === "Listening for question...") voiceStatus.innerText = "Done listening."; };
+    }
+
+    // Refresh Routing Event Reset Function
+    btnRestart.addEventListener('click', () => {
+        resultView.classList.add('hidden');
+        scanView.classList.remove('hidden');
+        qaDisplay.classList.add('hidden');
+        textBox.value = "";
+        summaryBox.innerText = "Thinking...";
+        voiceStatus.innerText = "Idle";
+        startCamera();
+    });
+</script>
+</body>
+</html>
